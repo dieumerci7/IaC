@@ -2,8 +2,8 @@
 AWS_REGION = "eu-west-3"
 
 # EC2 params
-AMI_ID = "ami-052f10f1c45aa2155"
-INSTANCE_TYPE = "t2.micro"
+AMI_ID = "ami-0ff71843f814379b3"
+INSTANCE_TYPE = "t3.micro"
 
 # Instance names
 INSTANCE_NAMES = ["server-1", "server-2"]

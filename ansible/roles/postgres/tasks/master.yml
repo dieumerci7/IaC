@@ -1,0 +1,112 @@
+- name: Create replication user
+  become: yes
+  become_user: postgres
+  postgresql_user:
+    name: "replicator"
+    password: "{{ replication_password }}"
+    role_attr_flags: "REPLICATION"
+
+- name: Create dinosaurs database
+  become: yes
+  become_user: postgres
+  postgresql_db:
+    name: dinosaurs_db
+    state: present
+
+- name: Create periods and dinosaurs tables
+  become: yes
+  become_user: postgres
+  postgresql_query:
+    db: dinosaurs_db
+    query: |
+      CREATE TABLE IF NOT EXISTS periods (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(50) UNIQUE NOT NULL,
+          era VARCHAR(50) NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS dinosaurs (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(50) UNIQUE NOT NULL,
+          length_meters DECIMAL(5,2),
+          diet VARCHAR(20) CHECK (diet IN ('Herbivore', 'Carnivore', 'Omnivore')),
+          period_id INT REFERENCES periods(id) ON DELETE SET NULL
+      );
+
+- name: Insert geological periods
+  become: yes
+  become_user: postgres
+  postgresql_query:
+    db: dinosaurs_db
+    query: |
+      INSERT INTO periods (name, era) VALUES
+      ('Jurassic', 'Mesozoic'),
+      ('Cretaceous', 'Mesozoic'),
+      ('Triassic', 'Mesozoic')
+      ON CONFLICT (name) DO NOTHING;
+
+- name: Insert dinosaurs data
+  become: yes
+  become_user: postgres
+  postgresql_query:
+    db: dinosaurs_db
+    query: |
+      INSERT INTO dinosaurs (name, length_meters, diet, period_id) VALUES
+      ('Tyrannosaurus Rex', 12.0, 'Carnivore', 2),
+      ('Triceratops', 9.0, 'Herbivore', 2),
+      ('Brachiosaurus', 22.0, 'Herbivore', 1),
+      ('Velociraptor', 2.0, 'Carnivore', 2),
+      ('Coelophysis', 3.0, 'Carnivore', 3)
+      ON CONFLICT (name) DO NOTHING;
+
+- name: Grant SELECT permissions to replicator on all existing tables
+  become: yes
+  become_user: postgres
+  postgresql_query:
+    db: dinosaurs_db
+    query: "GRANT SELECT ON ALL TABLES IN SCHEMA public TO replicator;"
+
+- name: Grant SELECT on future tables automatically
+  become: yes
+  become_user: postgres
+  postgresql_query:
+    db: dinosaurs_db
+    query: "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO replicator;"
+
+- name: Ensure pg_hba.conf allows replication
+  lineinfile:
+    path: /etc/postgresql/14/main/pg_hba.conf
+    line: "host    replication     replicator      {{secondary_host}}/32     md5"
+    state: present
+  notify: Restart PostgreSQL
+
+- name: Ensure pg_hba.conf allows replication
+  lineinfile:
+    path: /etc/postgresql/14/main/pg_hba.conf
+    line: "host    all     replicator      {{secondary_host}}/32     md5"
+    state: present
+  notify: Restart PostgreSQL
+
+- name: Ensure pg_hba.conf allows logical replication
+  lineinfile:
+    path: /etc/postgresql/14/main/pg_hba.conf
+    line: "host    dinosaurs_db     replicator      172.31.0.0/16     md5"
+    state: present
+  notify: Restart PostgreSQL
+
+- name: Ensure wal_level is set to logical
+  lineinfile:
+    path: /etc/postgresql/14/main/postgresql.conf
+    regexp: '^wal_level'
+    line: "wal_level = logical"
+
+- name: Ensure listen_addresses is set to '*'
+  lineinfile:
+    path: /etc/postgresql/14/main/postgresql.conf
+    regexp: '^listen_addresses'
+    line: "listen_addresses = '*'"
+  notify: Restart PostgreSQL
+
+- name: Restart PostgreSQL to apply config changes
+  systemd:
+    name: postgresql
+    state: restarted

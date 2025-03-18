@@ -1,0 +1,61 @@
+- name: Stop PostgreSQL service
+  systemd:
+    name: postgresql
+    state: stopped
+
+- name: Check if PostgreSQL data directory exists
+  stat:
+    path: /var/lib/postgresql/14/main
+  register: pg_data_dir
+
+- name: Remove existing PostgreSQL data directory if not empty
+  file:
+    path: /var/lib/postgresql/14/main
+    state: absent
+  when: pg_data_dir.stat.exists
+
+- name: Create streaming replication on Replica
+  command: > 
+    pg_basebackup -h {{ primary_host }}
+    -D /var/lib/postgresql/14/main 
+    -U replicator 
+    -Fp -Xs -P -R
+  environment:
+    PGPASSWORD: "{{ replication_password }}"
+  become_user: postgres
+
+- name: Start PostgreSQL service
+  systemd:
+    name: postgresql
+    state: started
+
+- name: Create a new PostgreSQL cluster for logical replication
+  command: "pg_createcluster {{ postgresql_version }} logical"
+  args:
+    creates: "/etc/postgresql/{{ postgresql_version }}/logical"
+  become: yes
+
+- name: Start the logical replication cluster
+  systemd:
+    name: "postgresql@{{ postgresql_version }}-logical"
+    state: started
+    enabled: yes
+
+- name: Ensure logical cluster listens on all addresses
+  lineinfile:
+    path: "/etc/postgresql/{{ postgresql_version }}/logical/postgresql.conf"
+    regexp: '^listen_addresses'
+    line: "listen_addresses = '*'"
+  notify: Restart Logical PostgreSQL
+
+- name: Ensure pg_hba.conf allows connections for logical replication
+  lineinfile:
+    path: "/etc/postgresql/{{ postgresql_version }}/logical/pg_hba.conf"
+    line: "host    dinosaurs_db     replicator      172.31.0.0/16     md5"
+    state: present
+  notify: Restart Logical PostgreSQL
+
+- name: Restart Logical PostgreSQL
+  systemd:
+    name: "postgresql@{{ postgresql_version }}-logical"
+    state: restarted

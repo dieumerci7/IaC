@@ -1,0 +1,9 @@
+- name: Restart PostgreSQL
+  systemd:
+    name: postgresql
+    state: restarted
+
+- name: Restart Logical PostgreSQL
+  systemd:
+    name: "postgresql@{{ postgresql_version }}-logical"
+    state: restarted

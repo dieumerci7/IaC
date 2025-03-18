@@ -1,0 +1,52 @@
+- name: Create publication on master
+  become: yes
+  become_user: postgres
+  postgresql_query:
+    db: dinosaurs_db
+    query: |
+      DO $$ 
+      BEGIN 
+          IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'my_pub') THEN
+              CREATE PUBLICATION my_pub FOR TABLE periods;
+          END IF;
+      END $$;
+  when: "'master' in group_names"
+
+- name: Ensure dinosaurs_db exists on the logical cluster
+  become: yes
+  become_user: postgres
+  postgresql_db:
+    name: dinosaurs_db
+    state: present
+  environment:
+    PGCLUSTER: "{{ postgresql_version }}/logical"
+    PGPORT: 5433
+  when: "'replica' in group_names"
+
+- name: Ensure periods table exists on the logical cluster
+  become: yes
+  become_user: postgres
+  postgresql_query:
+    db: dinosaurs_db
+    query: |
+      CREATE TABLE IF NOT EXISTS periods (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(50) UNIQUE NOT NULL,
+          era VARCHAR(50) NOT NULL
+      );
+  environment:
+    PGCLUSTER: "{{ postgresql_version }}/logical"
+    PGPORT: 5433
+  when: "'replica' in group_names"
+
+- name: Create subscription on replica
+  become: yes
+  become_user: postgres
+  postgresql_query:
+    db: dinosaurs_db
+    query: "CREATE SUBSCRIPTION my_sub CONNECTION 'host={{ primary_host }} user=replicator password={{ replication_password }} dbname=dinosaurs_db' PUBLICATION my_pub;"
+    autocommit: yes
+  environment:
+    PGCLUSTER: "{{ postgresql_version }}/logical"
+    PGPORT: 5433
+  when: "'replica' in group_names"

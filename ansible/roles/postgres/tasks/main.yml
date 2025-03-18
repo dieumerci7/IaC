@@ -1,0 +1,6 @@
+- include_tasks: install.yml
+- include_tasks: master.yml
+  when: "'master' in group_names"
+- include_tasks: replica.yml
+  when: "'replica' in group_names"
+- include_tasks: logical_replication.yml
